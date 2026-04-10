@@ -409,9 +409,9 @@ module hart #(
                      (ex_mem_mem_ren && (!ex_mem_req_issued || !i_dmem_valid)) ||
                      (ex_mem_mem_wen && !ex_mem_req_issued));
 
-    // Memory interfaces must only request when ready.
-    wire fetch_issue = !dmem_wait && !ex_control_redirect &&
-                       !if_req_pending && !if_buf_valid && i_imem_ready;
+    // Instruction fetch control
+    wire fetch_issue = (!dmem_wait) && (!ex_control_redirect) &&
+                       (!if_req_pending) && (!if_buf_valid) && (i_imem_ready);
 
     assign o_imem_ren = fetch_issue;
     assign o_dmem_addr = mem_dmem_addr_raw;
@@ -438,13 +438,14 @@ module hart #(
             ex_mem_req_issued <= 1'b0;
             mem_wb_valid <= 1'b0;
         end else begin
-            // Track fetch requests and responses.
+            // Instruction fetch control
             if (fetch_issue) begin
                 if_req_pending <= 1'b1;
                 if_req_pc <= if_pc;
                 if_pc <= if_pc_plus_4;
             end
 
+            // Instruction fetch response after memory response
             if (if_req_pending && i_imem_valid) begin
                 if_req_pending <= 1'b0;
                 if (if_drop_response) begin
@@ -456,32 +457,35 @@ module hart #(
                 end
             end
 
-            // Control redirect flushes decode and restarts fetch stream at target.
+            // Redirect and flush control
             if (ex_control_redirect) begin
                 if_pc <= ex_next_pc;
                 if_id_valid <= 1'b0;
                 if_id_pc <= 32'd0;
                 if_id_inst <= 32'd0;
                 if_buf_valid <= 1'b0;
-                if (if_req_pending)
+                if (if_req_pending) begin
                     if_drop_response <= 1'b1;
+                end
             end else if (!dmem_wait) begin
-                // IF/ID update only when pipeline can move forward.
-                if (!id_stall && if_buf_valid) begin
-                    if_id_valid <= 1'b1;
-                    if_id_pc <= if_buf_pc;
-                    if_id_inst <= if_buf_inst;
-                    if_buf_valid <= 1'b0;
-                end else if (!id_stall && !if_buf_valid) begin
-                    if_id_valid <= 1'b0;
-                    if_id_pc <= 32'd0;
-                    if_id_inst <= 32'd0;
+                // IF/ID update when memory is not waiting
+                if (!id_stall) begin
+                    if (if_buf_valid) begin
+                        if_id_valid <= 1'b1;
+                        if_id_pc <= if_buf_pc;
+                        if_id_inst <= if_buf_inst;
+                        if_buf_valid <= 1'b0;
+                    end else begin
+                        if_id_valid <= 1'b0;
+                        if_id_pc <= 32'd0;
+                        if_id_inst <= 32'd0;
+                    end
                 end
             end
 
             if (!dmem_wait) begin
                 // ID/EX update
-                if (ex_control_redirect || id_stall || !if_id_valid) begin
+                if (ex_control_redirect || id_stall || (!if_id_valid)) begin
                     id_ex_valid <= 1'b0;
                     id_ex_pc <= 32'd0;
                     id_ex_inst <= 32'd0;
@@ -550,9 +554,10 @@ module hart #(
                 ex_mem_halt <= id_ex_halt;
                 ex_mem_req_issued <= 1'b0;
             end else begin
-                // Keep current EX/MEM entry while waiting for dmem response.
-                if (dmem_issue)
+                // Wait for dmem response
+                if (dmem_issue) begin
                     ex_mem_req_issued <= 1'b1;
+                end
             end
 
             // MEM/WB update
