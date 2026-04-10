@@ -1,0 +1,7 @@
+*.hex
+*.o
+*.mem
+*.trace
+*.out
+tests/asm/*.asm
+!tb/rand.mem
